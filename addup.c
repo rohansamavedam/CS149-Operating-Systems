@@ -1,73 +1,64 @@
-// Krishna Rohan Samavedam, CS149 SECTION 01, FALL 2019
-
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <wait.h>
 
-double calculateSumInSingleFile(char *fileName){
-    FILE * numbersFile = fopen(fileName, "r");
-
-    double totalSum;
-
-    if (numbersFile == NULL){
-        printf("Error: File %s Not Found\n", fileName);
-        return 0;
+/*
+ * add floating point numbers in the files passed on the commandline in
+ * parallel. a subprocess is created for each commandline argument.
+ */
+double addup(const char *filename)
+{
+    double d;
+    double sum = 0;
+    FILE *fh = fopen(filename, "r");
+    if (fh == NULL) {
+       perror(filename);
+       return 0;
     }
-
-    int numberOfConversionsProcessed;
-    numberOfConversionsProcessed = fscanf(numbersFile, "%lf", &totalSum);
-
-    while(numberOfConversionsProcessed == 1){
-        double temp;
-
-        numberOfConversionsProcessed = fscanf(numbersFile, "%lf", &temp);
-
-        if(numberOfConversionsProcessed == 1) {
-            totalSum += temp;
-        }
+    while (fscanf(fh, "%lf", &d) == 1) {
+       sum += d;
     }
-
-    return totalSum;
+    fclose(fh);
+    return sum;
 }
 
-int main(int argc, char **argv) {
-
-    // Looping through the command line arguments and adding file names to an array.
-    char *arr[10];
-    int i = 1;
-    while(i < argc){
-        char * fileName = argv[i];
-        arr[i-1] = fileName;
-        i++;
-    }
-
-    // Declaring a pipe.
-    int p[2];
-    pipe(p);
-
-    double totalTotalSum;
-
-    for(int i = 0; i < argc - 1; i++){
-
-        if(fork() == 0){
-            // Calling the Single File Sum method that returns the sum of elements of each file.
-            char * fileName = arr[i];
-            double totalSum = calculateSumInSingleFile(fileName);
-
-            // Writing the Total Sum of the File to Parent Process.
-            write(p[1], &totalSum, sizeof(totalSum));
-            close(p[1]);
+int main(int argc, char **argv)
+{
+    double total = 0;
+    int fds[2];
+    pipe(fds);
+    for (int i = 1; i < argc; i++) {
+        pid_t pid = fork();
+	//printf("created %d for %s\n", pid, argv[i]);
+        if (pid == 0) {
+            double d = addup(argv[i]);
+            write(fds[1], &d, sizeof(d));
             exit(0);
         }
-
-        // Parent process reading the value from child.
-        double val;
-        read(p[0], &val, sizeof(val));
-        totalTotalSum = totalTotalSum + val;
+        if (pid == -1) {
+            // should never happen, but just in case...
+            perror("fork");
+        }
     }
 
-    printf("%lf\n", totalTotalSum);
-
+    // the parent is not going to write anything
+    close(fds[1]);
+    int wstatus;
+    pid_t pid;
+    while ((pid = wait(&wstatus)) != -1) {
+	if (!WIFEXITED(wstatus)) {
+	    // child crashes can be invisible, so track here
+	    printf("%d exited abnormally\n", pid);
+	}
+        double d;
+        if (read(fds[0], &d, sizeof d) != sizeof d) {
+            // this shouldn't happen either...
+            perror("short read");
+        } else {
+            total += d;
+        }
+    }
+    printf("%lf\n", total);
     return 0;
 }
-
